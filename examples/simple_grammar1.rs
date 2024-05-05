@@ -1,9 +1,8 @@
-use pilator::parser::SimpleParser;
-use pilator::parser::Parser;
+use pilator::parser::*;
 
 fn main() {
-    let s = SimpleParser {};
-    match s.parse("a", ()) {
+    let s = NaiveParser::new();
+    match s.parse("a", None) {
         Ok(_) => println!("Success"),
         Err(e) => println!("Error: {}", e),
     }
