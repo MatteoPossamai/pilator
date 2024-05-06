@@ -1,4 +1,5 @@
 use crate::components::regex::Regex;
+use crate::components::conditionals::{OneOrMore, ZeroOrMore, ZeroOrOne};
 
 /// Parser trait:
 /// this is the trait that every parser in the library should implement.
@@ -12,10 +13,14 @@ use crate::components::regex::Regex;
 pub trait Parser {
     type Config;
 
-    fn parse(&self, input: &str, config: Option<Self::Config>) -> Result<Regex, String>;
+    fn parse(&self, input: &str, config: Option<Self::Config>) -> Result<Vec<String>, String>;
 
-    fn custom_parse(_input: &str, _config: Option<Self::Config>) -> Result<Regex, String> {
+    fn custom_parse(_input: &str, _config: Option<Self::Config>) -> Result<Vec<String>, String> {
         Err("Not implemented".to_string())
+    }
+
+    fn tokenize_helper(_input: Vec<char>, _input_idx: usize, _regex: &Regex, _regex_idx: usize, _component_idx: usize, _result: &mut Vec<String>) -> Result<u32, String> {
+        Err("This should be private function".to_string())
     }
 
 }
@@ -76,17 +81,48 @@ impl NaiveParser {
 impl Parser for NaiveParser {
     type Config = ();
 
-    fn parse(&self, input: &str, _config: Option<Self::Config>) -> Result<Regex, String> {
-        println!("Standard parse {}", input);
 
-        for regex in self.regexes.iter() {
-            // TODO: check if the regex matches the input string, and if it does, return the splitted string 
-            // following the logic of the regex
+    fn parse(&self, input: &str, _config: Option<Self::Config>) -> Result<Vec<String>, String> {
+        // TODO: Implement the logic that tokenizes the string based on the regex
+        let mut valid_strings: u32 = 0;
+        let mut tokens: Vec<String> = Vec::new();
+
+        let input_chars = input.chars().collect::<Vec<char>>();
+        for component in self.regexes.iter() {
+            match Self::tokenize_helper(input_chars.clone(), 0,  component, 0, 0, &mut tokens){
+                Ok(count) => valid_strings += count,
+                Err(e) => return Err(e),
+            }
         }
 
-        Err("Not implemented".to_string())
+        if valid_strings == 0 {
+            return Err("No valid strings found".to_string());
+        } else if valid_strings > 1 {
+            return Err("Ambiguous match".to_string());
+        }
+        
+        Ok(tokens)
     }
 
+    fn tokenize_helper(input: Vec<char>, input_idx: usize, regex: &Regex, regex_idx: usize, component_idx: usize, result: &mut Vec<String>) -> Result<u32, String> {
+        if input_idx == input.len() as usize && regex_idx == regex.components.len() as usize {
+            // If we reach the end of the input and regex, the regex is a valid match
+            return Ok(1);
+        } else if input[input_idx] == ' ' {
+            // If we find space, we finished the RegexComponent. Check if we completed the regex component, and add the 
+            // token, otherwise this is not a match. Add the space just if there is not another space in the result
+            if component_idx == regex.components.len() as usize {
+                if result.last().is_some() && !(result.last().unwrap() == " ") {
+                    result.push(" ".to_string());
+                }
+                return Self::tokenize_helper(input, input_idx + 1, regex, regex_idx + 1, 0, result);
+            } else {
+                return Ok(0);
+            }
+        } else {
+        }
+        todo!()
+    }
 }
 
 pub struct LL1Parser {}

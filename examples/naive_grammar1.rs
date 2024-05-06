@@ -9,4 +9,4 @@ fn main() {
     println!("Hello, world!")
 }
 
-// cargo run --emaple simple_grammar1.rs
+// cargo run --emaple naive_grammar1.rs
