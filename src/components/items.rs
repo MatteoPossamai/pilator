@@ -1,15 +1,16 @@
+use crate::components::regex::Regex;
+
 /// enum RegexComponent 
 /// This enum is implemented by all the components that can be part of a regex.
 /// It has the method is_nullable that returns a boolean indicating if the component can be nullable or not.
+#[derive(Debug, Clone)]
 pub enum RegexComponent {
     Literal(String), 
     Keyword(String), 
-    ZeroOrMore(String),
-    OneOrMore(String),
-    ZeroOrOne(String),
-    Or(String),
-    Group(String),
-    Optional(String),    
+    ZeroOrMore(Regex),
+    OneOrMore(Regex),
+    ZeroOrOne(Regex),
+    Or(Regex),
 }
 
 impl RegexComponent {
@@ -23,8 +24,6 @@ impl RegexComponent {
             RegexComponent::OneOrMore(_) => false,
             RegexComponent::ZeroOrOne(_) => true,
             RegexComponent::Or(_) => false,
-            RegexComponent::Group(_) => false,
-            RegexComponent::Optional(_) => true,
         }
     }
 }

@@ -22,7 +22,7 @@ pub trait Parser {
         Err("Not implemented".to_string())
     }
 
-    fn tokenize_helper(_input: Vec<char>, _input_idx: usize, _regex: &Regex, _regex_idx: usize, _result: &mut Vec<String>) -> Result<u32, String> {
+    fn tokenize_helper(_input: Vec<char>, _input_idx: usize, _regex: &Regex, _regex_idx: usize, _result: &mut Vec<String>, end: usize) -> Result<u32, String> {
         Err("This should be private function".to_string())
     }
 
