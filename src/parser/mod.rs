@@ -2,8 +2,6 @@ pub mod naive_parser;
 pub mod llparsers;
 pub mod slrparsers;
 
-use crate::components::regex::Regex;
-
 /// Parser trait:
 /// this is the trait that every parser in the library should implement.
 /// It contains the following methods:
@@ -17,10 +15,4 @@ pub trait Parser {
     type Config;
 
     fn parse(&self, input: &str, config: Option<Self::Config>) -> Result<Vec<String>, String>;
-    fn tokenize_helper(_input: String, _input_idx: usize, _regex: &Regex, _regex_idx: usize, _result: &mut Vec<String>, end: usize) -> Result<u32, String>;
-
-    fn custom_parse(_input: &str, _config: Option<Self::Config>) -> Result<Vec<String>, String> {
-        Err("Not implemented".to_string())
-    }
-
 }

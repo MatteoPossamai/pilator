@@ -55,6 +55,122 @@ impl NaiveParser {
     pub fn remove_regex_with_index(&mut self, index: usize) {
         self.regexes.remove(index);
     }
+
+    fn matches(input: String, input_idx: usize, regex: RegexComponent) -> usize {
+        match regex {
+            RegexComponent::Literal(value) => {
+                if input_idx + value.len() > input.len() {
+                    return 0;
+                }
+                let word = input[input_idx..input_idx + value.len()].to_string();
+                if word != value {
+                    return 0;
+                }
+                return value.len();
+            }
+            RegexComponent::Keyword(value) => {
+                if input_idx + value.len() > input.len() {
+                    return 0;
+                }
+                let word = input[input_idx..input_idx + value.len()].to_string();
+                if word != value {
+                    return 0;
+                }
+                return value.len();
+            }
+            RegexComponent::ZeroOrMore(value) => {
+                let mut temp_idx = input_idx;
+
+                while temp_idx < input.len() {
+
+                    for component in value.components.iter() {
+                        let temp = Self::matches(input.clone(), temp_idx, component.clone());
+                        if temp == 0 {
+                            return temp_idx - input_idx;
+                        }
+                        temp_idx += temp;
+                    }
+                }
+                temp_idx - input_idx
+            }
+            RegexComponent::OneOrMore(value) => {
+                let mut temp_idx = input_idx;
+
+                while temp_idx < input.len() {
+                    for component in value.components.iter() {
+                        let temp = Self::matches(input.clone(), temp_idx, component.clone());
+                        if temp == 0 {
+                            return temp_idx - input_idx;
+                        }
+                        temp_idx += temp;
+                    }
+                }
+                temp_idx - input_idx
+            }
+            RegexComponent::ZeroOrOne(value) => {
+                let mut temp_idx = input_idx;
+
+                for component in value.components.iter() {
+                    let temp = Self::matches(input.clone(), temp_idx, component.clone());
+                    if temp == 0 {
+                        return temp_idx - input_idx;
+                    }
+                    temp_idx += temp;
+                }
+                temp_idx - input_idx
+                
+            }
+            RegexComponent::Or(regex1, regex2) => {
+                let temp1 = Self::matches(input.clone(), input_idx, RegexComponent::ZeroOrOne(regex1));
+                if temp1 != 0 {
+                    return temp1;
+                }
+                let temp2 = Self::matches(input, input_idx, RegexComponent::ZeroOrOne(regex2));
+                temp2
+            }
+        }
+    }
+
+    fn tokenize_helper(
+        input: String,
+        input_idx: usize,
+        regex: &Regex,
+        result: &mut Vec<String>,
+    ) -> Result<u32, String> {
+        if input_idx == input.len() {
+            // If we reach the end of the input and regex, the regex is a valid match
+            return Ok(1);
+        } else {
+            // Check what the current component is and call the corresponding method
+            let mut idx = input_idx;
+            let mut regex_idx = 0;
+            for component in regex.components.iter() {
+                let temp = Self::matches(input.clone(), idx, component.clone());
+                regex_idx += 1;
+                if temp == 0 {
+                    if component.is_nullable() {
+                        continue;
+                    }
+                    return Err("No match".to_string());
+                }
+                result.push(input[idx..idx + temp].to_string());
+                idx += temp;
+                if idx >= input.len() {
+                    break;
+                }
+            }
+
+            if regex_idx < regex.components.len() {
+                for component in regex.components[regex_idx..].iter() {
+                    if !component.is_nullable() {
+                        return Err("No match".to_string());
+                    }
+                }
+            }
+
+            Ok(1)
+        }
+    }
 }
 
 /// Parser trait implementation for NaiveParser, using its own Regex
@@ -62,8 +178,7 @@ impl Parser for NaiveParser {
     type Config = ();
 
     fn parse(&self, input: &str, _config: Option<Self::Config>) -> Result<Vec<String>, String> {
-        let mut valid_strings: u32 = 0;
-        let mut tokens: Vec<String> = vec![];
+        let mut tokens: Vec<String>;
 
         let input = input.trim().clone();
         for component in self.regexes.iter() {
@@ -72,228 +187,20 @@ impl Parser for NaiveParser {
                 input.to_string(),
                 0,
                 component,
-                0,
                 &mut tokens,
-                input.len(),
             ) {
-                Ok(count) => valid_strings += count,
-                Err(e) => return Err(e),
+                Ok(_) => {
+                    return Ok(tokens);
+                },
+                Err(_) => (),
             }
         }
 
-        if valid_strings == 0 {
-            return Err("Unable to parse from given input".to_string());
-        } else if valid_strings > 1 {
-            return Err("Ambiguous match".to_string());
-        }
+        Err("Unable to parse from given input".to_string())
 
-        Ok(tokens)
     }
 
-    fn tokenize_helper(
-        input: String,
-        input_idx: usize,
-        regex: &Regex,
-        regex_idx: usize,
-        result: &mut Vec<String>,
-        end: usize,
-    ) -> Result<u32, String> {
-        if input_idx == end && regex_idx == regex.components.len() as usize {
-            // If we reach the end of the input and regex, the regex is a valid match
-            return Ok(1);
-        } else if input_idx == end {
-            // Check if are all nullable the remaining components
-            for i in regex_idx..regex.components.len() {
-                if !regex.components[i].is_nullable() {
-                    return Ok(0);
-                }
-            }
-            Ok(1)
-        } else if regex_idx == regex.components.len() as usize {
-            // If we reach the end of the regex, but not the input, the regex is not a valid match
-            return Ok(0);
-        } else {
-            // Check what the current component is and call the corresponding method
-            match &regex.components[regex_idx] {
-                RegexComponent::Literal(value) => {
-                    if input_idx + value.len() > input.len() {
-                        return Ok(0);
-                    }
-                    let word = input[input_idx..input_idx + value.len()].to_string();
-                    if word != *value {
-                        return Ok(0);
-                    }
-                    result.push(word);
-                    let temp = Self::tokenize_helper(
-                        input,
-                        input_idx + value.len(),
-                        regex,
-                        regex_idx + 1,
-                        result,
-                        end,
-                    );
-                    let valid = match temp {
-                        Ok(v) => v,
-                        Err(e) => return Err(e),
-                    };
-                    return Ok(valid);
-                }
-                RegexComponent::Keyword(value) => {
-                    if input_idx + value.len() > input.len() {
-                        return Ok(0);
-                    }
-                    let word = input[input_idx..input_idx + value.len()].to_string();
-                    if word != *value {
-                        return Ok(0);
-                    }
-                    result.push(word);
-                    let temp = Self::tokenize_helper(
-                        input,
-                        input_idx + value.len(),
-                        regex,
-                        regex_idx + 1,
-                        result,
-                        end,
-                    );
-                    let valid = match temp {
-                        Ok(v) => v,
-                        Err(e) => return Err(e),
-                    };
-                    return Ok(valid);
-                }
-                RegexComponent::ZeroOrMore(value) => {
-                    let mut valid_occurences: u32 = 0;
-                    let mut temp_result: Vec<String> = vec![];
-                    let mut temp_idx = input_idx;
-                    // let new_regex = Regex::new(vec![value.clone()]) + regex[regex_idx + 1..];
-                    loop {
-                        let temp = Self::tokenize_helper(
-                            input.clone(),
-                            temp_idx,
-                            value,
-                            0,
-                            &mut temp_result,
-                            end,
-                        );
-                        println!("{:?}{:?}", temp, temp_result);
-                        let valid = match temp {
-                            Ok(v) => v,
-                            Err(e) => return Err(e),
-                        };
-                        if valid == 0 {
-                            break;
-                        }
-                        println!("Result: {:?}", result);
-                        valid_occurences += 1;
-                        temp_idx += 1;
-                        result.append(&mut temp_result);
-                        // Also increment the temp_idx
-                        let mut lenght = 0;
-                        for i in 0..temp_result.len() {
-                            lenght += temp_result[i].len();
-                        }
-                        temp_idx += lenght;
-                    }
-                    if valid_occurences == 0 {
-                        // Pass as it is not here
-                        let temp = Self::tokenize_helper(
-                            input.clone(),
-                            input_idx,
-                            regex,
-                            regex_idx + 1,
-                            result,
-                            end,
-                        );
-                        let valid = match temp {
-                            Ok(v) => v,
-                            Err(e) => return Err(e),
-                        };
-                        return Ok(valid);
-                    }else {
-                        return Ok(1);
-                    }
-
-                }
-                RegexComponent::OneOrMore(value) => {
-                    let mut valid_strings: u32 = 0;
-                    let mut temp_result: Vec<String> = vec![];
-                    let mut temp_idx = input_idx;
-                    loop {
-                        let temp = Self::tokenize_helper(
-                            input.clone(),
-                            temp_idx,
-                            value,
-                            0,
-                            &mut temp_result,
-                            end,
-                        );
-                        let valid = match temp {
-                            Ok(v) => v,
-                            Err(e) => return Err(e),
-                        };
-                        if valid == 0 {
-                            break;
-                        }
-                        valid_strings += valid;
-                        temp_idx += 1;
-                    }
-                    if valid_strings == 0 {
-                        return Ok(0);
-                    }
-                    result.append(&mut temp_result);
-                    let temp =
-                        Self::tokenize_helper(input, temp_idx, regex, regex_idx + 1, result, end);
-                    let valid = match temp {
-                        Ok(v) => v,
-                        Err(e) => return Err(e),
-                    };
-                    return Ok(valid);
-                }
-                RegexComponent::ZeroOrOne(value) => {
-                    // First parse as it was there
-                    let mut temp_result: Vec<String> = vec![];
-                    let temp = Self::tokenize_helper(
-                        input.clone(),
-                        input_idx,
-                        value,
-                        0,
-                        &mut temp_result,
-                        end,
-                    );
-
-                    // If it succeeds, return the result
-                    // If it fails, try to parse the regex as the pattern does not appear
-                    match temp {
-                        Ok(val) => {
-                            result.append(&mut temp_result);
-                            return Ok(val);
-                        }
-                        Err(_) => {
-                            // If it fails, try to parse the next regex
-                            let temp = Self::tokenize_helper(
-                                input.clone(),
-                                input_idx,
-                                regex,
-                                regex_idx + 1,
-                                result,
-                                end,
-                            );
-                            let valid = match temp {
-                                Ok(v) => v,
-                                Err(e) => return Err(e),
-                            };
-                            result.append(&mut temp_result);
-                            return Ok(valid);
-                        }
-                    }
-                }
-                RegexComponent::Or(regex1, regex2) => {
-                    println!("{:?}{:?}", regex1, regex2);
-                    todo!("Implement Or")
-                }
-            };
-        }
-    }
+    
 }
 
 // Unit tests for the created structures
@@ -526,8 +433,7 @@ mod test {
                     vec![
                         "a".to_string(),
                         "b".to_string(),
-                        "a".to_string(),
-                        "b".to_string()
+                        "ab".to_string(),
                     ]
                 );
             }
@@ -623,8 +529,7 @@ mod test {
                     vec![
                         "a".to_string(),
                         "b".to_string(),
-                        "a".to_string(),
-                        "a".to_string()
+                        "aa".to_string(),
                     ]
                 );
             }
@@ -663,14 +568,245 @@ mod test {
                     r,
                     vec![
                         "IF".to_string(),
+                        " ".to_string(),
                         "10".to_string(),
+                        " ".to_string(),
                         "<".to_string(),
+                        " ".to_string(),
                         "20".to_string(),
+                        " ".to_string(),
                         "THEN".to_string(),
-                        "PRINT".to_string(),
-                        "<".to_string()
+                        " ".to_string(),
+                        "PRINTPRINTPRINT".to_string(),
                     ]
                 );
+            }
+            Err(e) => panic!("Error: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_naive_parser_zero_or_more_with_following() {
+        let litteral_1 = RegexComponent::Literal("a".to_string());
+        let litteral_2 = RegexComponent::Literal("b".to_string());
+        let litteral_3 = RegexComponent::Literal("c".to_string());
+        let regex_1 = Regex::new(vec![
+            litteral_2.clone(),
+            RegexComponent::ZeroOrMore(Regex::new(vec![litteral_1.clone()])),
+            litteral_3.clone(),
+        ]);
+
+        let mut s = NaiveParser::new();
+        s.add_regex(regex_1);
+        match s.parse("bac", None) {
+            Ok(r) => {
+                assert_eq!(r, vec!["b".to_string(), "a".to_string(), "c".to_string()]);
+            }
+            Err(e) => panic!("Error: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_one_or_more_one_occurence() {
+        let litteral_1 = RegexComponent::Literal("a".to_string());
+        let litteral_2 = RegexComponent::Literal("b".to_string());
+        let regex_1 = Regex::new(vec![
+            litteral_1.clone(),
+            RegexComponent::OneOrMore(Regex::new(vec![litteral_1.clone()])),
+            litteral_2.clone(),
+        ]);
+
+        let mut s = NaiveParser::new();
+        s.add_regex(regex_1);
+        match s.parse("aab", None) {
+            Ok(r) => {
+                assert_eq!(r, vec!["a".to_string(), "a".to_string(), "b".to_string()]);
+            }
+            Err(e) => panic!("Error: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_one_or_more_multiple_occurences() {
+        let litteral_1 = RegexComponent::Literal("a".to_string());
+        let litteral_2 = RegexComponent::Literal("b".to_string());
+        let regex_1 = Regex::new(vec![
+            litteral_1.clone(),
+            RegexComponent::OneOrMore(Regex::new(vec![litteral_1.clone()])),
+            litteral_2.clone(),
+        ]);
+
+        let mut s = NaiveParser::new();
+        s.add_regex(regex_1);
+        match s.parse("aaab", None) {
+            Ok(r) => {
+                assert_eq!(r, vec!["a".to_string(), "aa".to_string(), "b".to_string()]);
+            }
+            Err(e) => panic!("Error: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_one_or_more_only() {
+        let litteral_1 = RegexComponent::Literal("a".to_string());
+        let regex_1 = Regex::new(vec![
+            RegexComponent::OneOrMore(Regex::new(vec![litteral_1.clone()])),
+        ]);
+
+        let mut s = NaiveParser::new();
+        s.add_regex(regex_1);
+        match s.parse("aaa", None) {
+            Ok(r) => {
+                assert_eq!(r, vec!["aaa".to_string()]);
+            }
+            Err(e) => panic!("Error: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_one_or_more_with_zero_or_more_nested() {
+        let litteral_1 = RegexComponent::Literal("a".to_string());
+        let litteral_2 = RegexComponent::Literal("b".to_string());
+        let litteral_3 = RegexComponent::Literal("c".to_string());
+        let regex_1 = Regex::new(vec![
+            litteral_1.clone(),
+            RegexComponent::OneOrMore(Regex::new(vec![
+                litteral_1.clone(),
+                RegexComponent::ZeroOrMore(Regex::new(vec![litteral_2.clone()])),
+                litteral_3.clone(),
+            ])),
+            litteral_2.clone(),
+        ]);
+
+        let mut s = NaiveParser::new();
+        s.add_regex(regex_1);
+        match s.parse("aabcb", None) {
+            Ok(r) => {
+                assert_eq!(r, vec!["a".to_string(), "abc".to_string(), "b".to_string()]);
+            }
+            Err(e) => panic!("Error: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_zero_or_more_with_one_or_more_nested() {
+        let litteral_1 = RegexComponent::Literal("a".to_string());
+        let litteral_2 = RegexComponent::Literal("b".to_string());
+        let litteral_3 = RegexComponent::Literal("c".to_string());
+        let regex_1 = Regex::new(vec![
+            litteral_1.clone(),
+            RegexComponent::ZeroOrMore(Regex::new(vec![
+                litteral_1.clone(),
+                RegexComponent::OneOrMore(Regex::new(vec![litteral_2.clone()])),
+                litteral_3.clone(),
+            ])),
+            litteral_2.clone(),
+        ]);
+
+        let mut s = NaiveParser::new();
+        s.add_regex(regex_1);
+        match s.parse("aabbbbcabcabbbbbcb", None) {
+            Ok(r) => {
+                assert_eq!(r, vec!["a".to_string(), "abbbbcabcabbbbbc".to_string(), "b".to_string()]);
+            }
+            Err(e) => panic!("Error: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_zero_or_more_with_zero_or_more_nested() {
+        let litteral_1 = RegexComponent::Literal("a".to_string());
+        let litteral_2 = RegexComponent::Literal("b".to_string());
+        let litteral_3 = RegexComponent::Literal("c".to_string());
+        let regex_1 = Regex::new(vec![
+            litteral_1.clone(),
+            RegexComponent::ZeroOrMore(Regex::new(vec![
+                litteral_1.clone(),
+                RegexComponent::ZeroOrMore(Regex::new(vec![litteral_2.clone()])),
+                litteral_3.clone(),
+            ])),
+            litteral_2.clone(),
+        ]);
+
+        let mut s = NaiveParser::new();
+        s.add_regex(regex_1);
+        match s.parse("aabbbbcabcabbbbbcb", None) {
+            Ok(r) => {
+                assert_eq!(r, vec!["a".to_string(), "abbbbcabcabbbbbc".to_string(), "b".to_string()]);
+            }
+            Err(e) => panic!("Error: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_zero_or_more_with_one_or_more_nested_and_zero_or_one() {
+        let litteral_1 = RegexComponent::Literal("a".to_string());
+        let litteral_2 = RegexComponent::Literal("b".to_string());
+        let litteral_3 = RegexComponent::Literal("c".to_string());
+        let regex_1 = Regex::new(vec![
+            litteral_1.clone(),
+            RegexComponent::ZeroOrMore(Regex::new(vec![
+                litteral_1.clone(),
+                RegexComponent::OneOrMore(Regex::new(vec![litteral_2.clone()])),
+                litteral_3.clone(),
+            ])),
+            litteral_2.clone(),
+            RegexComponent::ZeroOrOne(Regex::new(vec![litteral_1.clone()])),
+        ]);
+
+        let mut s = NaiveParser::new();
+        s.add_regex(regex_1);
+        match s.parse("aabbbbcabcabbbbbcb", None) {
+            Ok(r) => {
+                assert_eq!(r, vec!["a".to_string(), "abbbbcabcabbbbbc".to_string(), "b".to_string()]);
+            }
+            Err(e) => panic!("Error: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_naive_parser_or_regex_1() {
+        let litteral_1 = RegexComponent::Literal("a".to_string());
+        let litteral_2 = RegexComponent::Literal("b".to_string());
+        let litteral_3 = RegexComponent::Literal("c".to_string());
+        let regex_1 = Regex::new(vec![
+            litteral_1.clone(),
+            RegexComponent::Or(
+                Regex::new(vec![litteral_2.clone()]),
+                Regex::new(vec![litteral_3.clone()]),
+            ),
+            litteral_2.clone(),
+        ]);
+
+        let mut s = NaiveParser::new();
+        s.add_regex(regex_1);
+        match s.parse("abb", None) {
+            Ok(r) => {
+                assert_eq!(r, vec!["a".to_string(), "b".to_string(), "b".to_string()]);
+            }
+            Err(e) => panic!("Error: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_naive_parser_or_regex_2() {
+        let litteral_1 = RegexComponent::Literal("a".to_string());
+        let litteral_2 = RegexComponent::Literal("b".to_string());
+        let litteral_3 = RegexComponent::Literal("c".to_string());
+        let regex_1 = Regex::new(vec![
+            litteral_1.clone(),
+            RegexComponent::Or(
+                Regex::new(vec![litteral_2.clone()]),
+                Regex::new(vec![litteral_3.clone()]),
+            ),
+            litteral_2.clone(),
+        ]);
+
+        let mut s = NaiveParser::new();
+        s.add_regex(regex_1);
+        match s.parse("acb", None) {
+            Ok(r) => {
+                assert_eq!(r, vec!["a".to_string(), "c".to_string(), "b".to_string()]);
             }
             Err(e) => panic!("Error: {}", e),
         }
